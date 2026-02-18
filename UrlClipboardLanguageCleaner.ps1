@@ -210,7 +210,8 @@ function Remove-UrlLocale {
     if ($uri.Scheme -notin @('http', 'https')) { return $null }
 
     $originalPath = $uri.AbsolutePath
-    $cleanedPath = $originalPath -replace $localePattern, '', 1
+    # Use .NET Regex to replace only the first match
+    $cleanedPath = [System.Text.RegularExpressions.Regex]::Replace($originalPath, $localePattern, '', 1)
 
     if ($cleanedPath -eq $originalPath) { return $null }
 
