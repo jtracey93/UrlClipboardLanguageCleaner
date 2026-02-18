@@ -187,8 +187,11 @@ if ($Uninstall) {
 if ($Install) {
     Install-AutoStart | Out-Null
     Write-Host ""
-    Write-Host "Starting clipboard monitor now..." -ForegroundColor Cyan
-    Write-Host ""
+    # Launch the monitor as a hidden background process and return
+    $psExe = (Get-Process -Id $PID).Path
+    Start-Process $psExe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`"" -WindowStyle Hidden
+    Write-Host "Clipboard monitor started in the background." -ForegroundColor Green
+    exit 0
 }
 
 $localePattern = '(?i)/[a-z]{2}(?:-[a-z]{2,4})?(?=/)'
