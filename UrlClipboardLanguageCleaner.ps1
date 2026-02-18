@@ -54,7 +54,9 @@ function Install-AutoStart {
 
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = "powershell.exe"
+        # Use whichever PowerShell is running this script (pwsh.exe or powershell.exe)
+        $psExe = (Get-Process -Id $PID).Path
+        $shortcut.TargetPath = $psExe
         $shortcut.Arguments = "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`""
         $shortcut.WindowStyle = 7
         $shortcut.Description = "Monitors clipboard and removes locale segments from URLs"
@@ -229,101 +231,161 @@ Write-Host " URL Clipboard Language Cleaner" -ForegroundColor Cyan
 
 # --- Windows: event-driven via AddClipboardFormatListener ---
 if ($platform -eq 'Windows') {
-    Add-Type -AssemblyName System.Windows.Forms
 
-    Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @'
+    # Pure P/Invoke approach - works on both PowerShell 5.1 and 7+ without WinForms assembly issues
+    Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
-using System.Text.RegularExpressions;
+using System.Threading;
 
-public class ClipboardMonitor : Form
+public static class ClipboardNative
 {
-    private const int WM_CLIPBOARDUPDATE = 0x031D;
-    private static readonly Regex LocalePattern = new Regex(
-        @"(?i)/[a-z]{2}(?:-[a-z]{2,4})?(?=/)",
-        RegexOptions.Compiled);
-
-    private bool _processing = false;
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AddClipboardFormatListener(IntPtr hwnd);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool AddClipboardFormatListener(IntPtr hwnd);
+    public static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
+    public static extern bool OpenClipboard(IntPtr hWndNewOwner);
 
-    public event Action<string, string> UrlCleaned;
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseClipboard();
 
-    public ClipboardMonitor()
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool EmptyClipboard();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetClipboardData(uint uFormat);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsClipboardFormatAvailable(uint format);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GlobalLock(IntPtr hMem);
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GlobalUnlock(IntPtr hMem);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
+
+    [DllImport("kernel32.dll")]
+    public static extern UIntPtr GlobalSize(IntPtr hMem);
+
+    public const uint CF_UNICODETEXT = 13;
+    public const uint GMEM_MOVEABLE = 0x0002;
+
+    public static string GetText()
     {
-        this.ShowInTaskbar = false;
-        this.WindowState = FormWindowState.Minimized;
-        this.FormBorderStyle = FormBorderStyle.None;
-        this.Opacity = 0;
-    }
-
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        AddClipboardFormatListener(this.Handle);
-    }
-
-    protected override void OnHandleDestroyed(EventArgs e)
-    {
-        RemoveClipboardFormatListener(this.Handle);
-        base.OnHandleDestroyed(e);
-    }
-
-    protected override void WndProc(ref Message m)
-    {
-        if (m.Msg == WM_CLIPBOARDUPDATE && !_processing)
-        {
-            _processing = true;
-            try { ProcessClipboard(); }
-            finally { _processing = false; }
-        }
-        base.WndProc(ref m);
-    }
-
-    private void ProcessClipboard()
-    {
-        string text;
+        if (!IsClipboardFormatAvailable(CF_UNICODETEXT)) return null;
+        if (!OpenClipboard(IntPtr.Zero)) return null;
         try
         {
-            if (!Clipboard.ContainsText()) return;
-            text = Clipboard.GetText();
+            IntPtr hData = GetClipboardData(CF_UNICODETEXT);
+            if (hData == IntPtr.Zero) return null;
+            IntPtr pData = GlobalLock(hData);
+            if (pData == IntPtr.Zero) return null;
+            try { return Marshal.PtrToStringUni(pData); }
+            finally { GlobalUnlock(hData); }
         }
-        catch { return; }
-
-        if (string.IsNullOrWhiteSpace(text)) return;
-        text = text.Trim();
-
-        Uri uri;
-        if (!Uri.TryCreate(text, UriKind.Absolute, out uri)) return;
-        if (uri.Scheme != "http" && uri.Scheme != "https") return;
-
-        string originalPath = uri.AbsolutePath;
-        string cleanedPath = LocalePattern.Replace(originalPath, "", 1);
-        if (cleanedPath == originalPath) return;
-
-        var builder = new UriBuilder(uri) { Path = cleanedPath };
-        string cleanedUrl = builder.Uri.AbsoluteUri;
-
-        try { Clipboard.SetText(cleanedUrl); }
-        catch { return; }
-
-        if (UrlCleaned != null) UrlCleaned(text, cleanedUrl);
+        finally { CloseClipboard(); }
     }
 
-    public void Stop()
+    public static bool SetText(string text)
     {
-        if (this.InvokeRequired)
-            this.Invoke(new Action(() => this.Close()));
-        else
-            this.Close();
+        if (!OpenClipboard(IntPtr.Zero)) return false;
+        try
+        {
+            EmptyClipboard();
+            int bytes = (text.Length + 1) * 2;
+            IntPtr hGlobal = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)bytes);
+            if (hGlobal == IntPtr.Zero) return false;
+            IntPtr pGlobal = GlobalLock(hGlobal);
+            try { Marshal.Copy(text.ToCharArray(), 0, pGlobal, text.Length); }
+            finally { GlobalUnlock(hGlobal); }
+            SetClipboardData(CF_UNICODETEXT, hGlobal);
+            return true;
+        }
+        finally { CloseClipboard(); }
     }
+
+    // Message-only window via raw Win32
+    public delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct WNDCLASS
+    {
+        public uint style;
+        public WndProcDelegate lpfnWndProc;
+        public int cbClsExtra;
+        public int cbWndExtra;
+        public IntPtr hInstance;
+        public IntPtr hIcon;
+        public IntPtr hCursor;
+        public IntPtr hbrBackground;
+        public string lpszMenuName;
+        public string lpszClassName;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MSG
+    {
+        public IntPtr hwnd;
+        public uint message;
+        public IntPtr wParam;
+        public IntPtr lParam;
+        public uint time;
+        public int ptX;
+        public int ptY;
+    }
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern ushort RegisterClassW(ref WNDCLASS lpWndClass);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern IntPtr CreateWindowExW(
+        uint dwExStyle, string lpClassName, string lpWindowName, uint dwStyle,
+        int x, int y, int nWidth, int nHeight,
+        IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr DefWindowProcW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetMessageW(out MSG msg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr DispatchMessageW(ref MSG msg);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool TranslateMessage(ref MSG msg);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern void PostQuitMessage(int nExitCode);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetModuleHandle(string lpModuleName);
+
+    public static readonly IntPtr HWND_MESSAGE = new IntPtr(-3);
+    public const uint WM_CLIPBOARDUPDATE = 0x031D;
+    public const uint WM_DESTROY = 0x0002;
 }
 '@
 
@@ -335,22 +397,76 @@ public class ClipboardMonitor : Form
     Write-Host "Press Ctrl+C to stop." -ForegroundColor Yellow
     Write-Host ""
 
-    $monitor = New-Object ClipboardMonitor
-    Register-ObjectEvent -InputObject $monitor -EventName UrlCleaned -Action {
-        $original = $Event.SourceArgs[0]
-        $cleaned  = $Event.SourceArgs[1]
-        $timestamp = Get-Date -Format "HH:mm:ss"
-        Write-Host "[$timestamp] " -NoNewline -ForegroundColor DarkGray
-        Write-Host "Cleaned: " -NoNewline -ForegroundColor Green
-        Write-Host "$original"
-        Write-Host "      -> " -NoNewline -ForegroundColor Green
-        Write-Host "$cleaned"
-    } | Out-Null
+    $processing = $false
+
+    # WndProc callback - processes clipboard update messages
+    $wndProc = [ClipboardNative+WndProcDelegate]{
+        param([IntPtr]$hWnd, [uint]$msg, [IntPtr]$wParam, [IntPtr]$lParam)
+
+        if ($msg -eq [ClipboardNative]::WM_CLIPBOARDUPDATE -and -not $script:processing) {
+            $script:processing = $true
+            try {
+                $text = [ClipboardNative]::GetText()
+                if ($text -and $text.Trim() -match '^https?://') {
+                    $cleaned = Remove-UrlLocale -Text $text
+                    if ($cleaned) {
+                        [ClipboardNative]::SetText($cleaned) | Out-Null
+                        Write-CleanedLog -Original $text.Trim() -Cleaned $cleaned
+                    }
+                }
+            }
+            finally { $script:processing = $false }
+            return [IntPtr]::Zero
+        }
+
+        if ($msg -eq [ClipboardNative]::WM_DESTROY) {
+            [ClipboardNative]::PostQuitMessage(0)
+            return [IntPtr]::Zero
+        }
+
+        return [ClipboardNative]::DefWindowProcW($hWnd, $msg, $wParam, $lParam)
+    }
+
+    # Register window class and create message-only window
+    $className = "UrlClipboardCleaner_$([System.Diagnostics.Process]::GetCurrentProcess().Id)"
+    $wc = New-Object ClipboardNative+WNDCLASS
+    $wc.lpfnWndProc = $wndProc
+    $wc.hInstance = [ClipboardNative]::GetModuleHandle($null)
+    $wc.lpszClassName = $className
+
+    $atom = [ClipboardNative]::RegisterClassW([ref]$wc)
+    if ($atom -eq 0) {
+        Write-Host "ERROR: Failed to register window class." -ForegroundColor Red
+        exit 1
+    }
+
+    $hwnd = [ClipboardNative]::CreateWindowExW(
+        0, $className, "", 0,
+        0, 0, 0, 0,
+        [ClipboardNative]::HWND_MESSAGE, [IntPtr]::Zero, $wc.hInstance, [IntPtr]::Zero)
+
+    if ($hwnd -eq [IntPtr]::Zero) {
+        Write-Host "ERROR: Failed to create message window." -ForegroundColor Red
+        exit 1
+    }
+
+    $registered = [ClipboardNative]::AddClipboardFormatListener($hwnd)
+    if (-not $registered) {
+        Write-Host "ERROR: Failed to register clipboard listener." -ForegroundColor Red
+        exit 1
+    }
 
     try {
-        [System.Windows.Forms.Application]::Run($monitor)
+        # Win32 message loop
+        $msg = New-Object ClipboardNative+MSG
+        while ([ClipboardNative]::GetMessageW([ref]$msg, [IntPtr]::Zero, 0, 0)) {
+            [ClipboardNative]::TranslateMessage([ref]$msg) | Out-Null
+            [ClipboardNative]::DispatchMessageW([ref]$msg) | Out-Null
+        }
     }
     finally {
+        [ClipboardNative]::RemoveClipboardFormatListener($hwnd) | Out-Null
+        [ClipboardNative]::DestroyWindow($hwnd) | Out-Null
         Write-Host "`nStopped." -ForegroundColor Yellow
     }
     return
