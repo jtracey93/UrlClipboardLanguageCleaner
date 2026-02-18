@@ -2,7 +2,7 @@
 .SYNOPSIS
     Monitors the clipboard for URLs and removes language/locale segments.
 .DESCRIPTION
-    Cross-platform PowerShell clipboard monitor. On Windows, uses the Win32
+    Cross-platform PowerShell 7+ clipboard monitor. On Windows, uses the Win32
     AddClipboardFormatListener API for event-driven monitoring (zero CPU when
     idle). On macOS/Linux, uses efficient polling via pbpaste/xclip/wl-paste.
     Strips locale path segments (e.g. /en-gb/, /en-us/, /fr-fr/) so shared
@@ -20,15 +20,17 @@
     ./UrlClipboardLanguageCleaner.ps1 -PollingIntervalMs 300
     # (macOS/Linux only) Polls every 300ms instead of the default 500ms
 #>
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [switch]$Install,
     [switch]$Uninstall,
+    [ValidateRange(100, 5000)]
     [int]$PollingIntervalMs = 500
 )
 
-# --- Platform detection ---
-$platform = if ($IsWindows -or [System.Environment]::OSVersion.Platform -eq 'Win32NT') {
+# --- Platform detection (PowerShell 7+ only) ---
+$platform = if ($IsWindows) {
     'Windows'
 } elseif ($IsMacOS) {
     'macOS'
@@ -54,10 +56,9 @@ function Install-AutoStart {
 
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutPath)
-        # Use whichever PowerShell is running this script (pwsh.exe or powershell.exe)
         $psExe = (Get-Process -Id $PID).Path
         $shortcut.TargetPath = $psExe
-        $shortcut.Arguments = "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`""
+        $shortcut.Arguments = "-WindowStyle Hidden -NoProfile -File `"$scriptPath`""
         $shortcut.WindowStyle = 7
         $shortcut.Description = "Monitors clipboard and removes locale segments from URLs"
         $shortcut.Save()
@@ -77,6 +78,11 @@ function Install-AutoStart {
         $pwshPath = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
         if (-not $pwshPath) { $pwshPath = "/usr/local/bin/pwsh" }
 
+        # XML-escape the paths to prevent injection via special characters
+        $escapedPwshPath = [System.Security.SecurityElement]::Escape($pwshPath)
+        $escapedScriptPath = [System.Security.SecurityElement]::Escape($scriptPath)
+        $escapedHome = [System.Security.SecurityElement]::Escape($HOME)
+
         $plistContent = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -86,19 +92,19 @@ function Install-AutoStart {
     <string>com.user.$appName</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$pwshPath</string>
+        <string>$escapedPwshPath</string>
         <string>-NoProfile</string>
         <string>-File</string>
-        <string>$scriptPath</string>
+        <string>$escapedScriptPath</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>$HOME/Library/Logs/$appName.log</string>
+    <string>$escapedHome/Library/Logs/$appName.log</string>
     <key>StandardErrorPath</key>
-    <string>$HOME/Library/Logs/$appName.err</string>
+    <string>$escapedHome/Library/Logs/$appName.err</string>
 </dict>
 </plist>
 "@
@@ -126,7 +132,7 @@ Description=URL Clipboard Language Cleaner
 After=graphical-session.target
 
 [Service]
-ExecStart=$pwshPath -NoProfile -File $scriptPath
+ExecStart=$pwshPath -NoProfile -File "$scriptPath"
 Restart=on-failure
 RestartSec=5
 
@@ -189,17 +195,24 @@ if ($Install) {
     Write-Host ""
     # Launch the monitor as a hidden background process and return
     $psExe = (Get-Process -Id $PID).Path
-    Start-Process $psExe -ArgumentList "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`"" -WindowStyle Hidden
+    Start-Process $psExe -ArgumentList "-WindowStyle Hidden -NoProfile -File `"$scriptPath`"" -WindowStyle Hidden
     Write-Host "Clipboard monitor started in the background." -ForegroundColor Green
     exit 0
 }
 
-$localePattern = '(?i)/[a-z]{2}(?:-[a-z]{2,4})?(?=/)'
+# Matches locale path segments at any position in the URL path:
+# - /xx-xx/ format (e.g. /en-gb/, /fr-fr/, /zh-hans/) - always matched
+# - /xx/ bare 2-letter codes (e.g. /en/, /fr/, /de/) - matched unless
+#   the code is a common English word that would cause false positives
+$localePattern = '(?i)\/[a-z]{2}(?:-[a-z]{2,4})?(?=\/)'
+$excludedCodes = @('to','do','go','me','us','my','no','or','so','up','if','in','on','at','by','of','as','is','it','an')
 
 function Remove-UrlLocale {
     param([string]$Text)
 
     $Text = $Text.Trim()
+    if ($Text.Length -gt 2048) { return $null }
+
     try {
         $uri = [System.Uri]::new($Text)
     }
@@ -210,8 +223,14 @@ function Remove-UrlLocale {
     if ($uri.Scheme -notin @('http', 'https')) { return $null }
 
     $originalPath = $uri.AbsolutePath
-    # Use .NET Regex to replace only the first match
-    $cleanedPath = [System.Text.RegularExpressions.Regex]::Replace($originalPath, $localePattern, '', 1)
+
+    # Check if the match is a bare 2-letter code in the exclusion list
+    $match = [System.Text.RegularExpressions.Regex]::Match($originalPath, $localePattern)
+    if (-not $match.Success) { return $null }
+    $matchedCode = $match.Value.TrimStart('/').ToLowerInvariant()
+    if ($matchedCode.Length -eq 2 -and $matchedCode -in $excludedCodes) { return $null }
+
+    $cleanedPath = $originalPath.Remove($match.Index, $match.Length)
 
     if ($cleanedPath -eq $originalPath) { return $null }
 
@@ -236,11 +255,10 @@ Write-Host " URL Clipboard Language Cleaner" -ForegroundColor Cyan
 # --- Windows: event-driven via AddClipboardFormatListener ---
 if ($platform -eq 'Windows') {
 
-    # Pure P/Invoke approach - works on both PowerShell 5.1 and 7+ without WinForms assembly issues
+    # Pure P/Invoke approach for PowerShell 7+ - no WinForms dependency
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-using System.Threading;
 
 public static class ClipboardNative
 {
@@ -289,6 +307,7 @@ public static class ClipboardNative
 
     public const uint CF_UNICODETEXT = 13;
     public const uint GMEM_MOVEABLE = 0x0002;
+    public const uint GMEM_ZEROINIT = 0x0040;
 
     public static string GetText()
     {
@@ -308,14 +327,17 @@ public static class ClipboardNative
 
     public static bool SetText(string text)
     {
+        if (text == null || text.Length > 1048576) return false;
         if (!OpenClipboard(IntPtr.Zero)) return false;
         try
         {
             EmptyClipboard();
-            int bytes = (text.Length + 1) * 2;
-            IntPtr hGlobal = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)bytes);
+            int chars = text.Length + 1; // +1 for null terminator
+            int bytes = chars * 2;
+            IntPtr hGlobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, (UIntPtr)bytes);
             if (hGlobal == IntPtr.Zero) return false;
             IntPtr pGlobal = GlobalLock(hGlobal);
+            if (pGlobal == IntPtr.Zero) return false;
             try { Marshal.Copy(text.ToCharArray(), 0, pGlobal, text.Length); }
             finally { GlobalUnlock(hGlobal); }
             SetClipboardData(CF_UNICODETEXT, hGlobal);
