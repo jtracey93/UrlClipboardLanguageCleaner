@@ -1,0 +1,14 @@
+# Ignore PowerShell module/script artifacts
+*.psm1~
+*.ps1~
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+Thumbs.db
+.DS_Store
