@@ -95,6 +95,13 @@ Sets the polling interval to 300ms instead of the default 500ms. This has no eff
 
 A Manifest V3 browser extension is also available in the [`browser-extension/`](./browser-extension/) directory. It brings the same URL locale-cleaning functionality to Microsoft Edge and Google Chrome.
 
+### Install from the store
+
+| Browser | Store link |
+|---|---|
+| **Google Chrome** | [Install from Chrome Web Store](#) *(link coming soon — will be updated after publication)* |
+| **Microsoft Edge** | [Install from Edge Add-ons](#) *(link coming soon — will be updated after publication)* |
+
 ### Features
 
 - **Automatic copy interception** — locale segments are stripped as you copy URLs from any web page
