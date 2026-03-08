@@ -1,0 +1,28 @@
+name: Extension Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - 'browser-extension/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run Extension Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run URL cleaner unit tests
+        run: node --test browser-extension/tests/url-cleaner.test.js

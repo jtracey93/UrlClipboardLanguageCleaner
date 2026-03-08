@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>URL Clipboard Language Cleaner</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <img src="../icons/icon48.png" alt="" class="logo" width="32" height="32" />
+      <h1 class="title">URL Language Cleaner</h1>
+    </header>
+
+    <div class="toggle-row">
+      <span class="toggle-label" id="status-text">Enabled</span>
+      <label class="switch" aria-label="Toggle extension on or off">
+        <input type="checkbox" id="enabled-toggle" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="clipboard-section">
+      <p class="section-label">Current clipboard</p>
+      <div id="clipboard-preview" class="clipboard-preview" aria-live="polite">
+        <span class="placeholder">Click to check clipboard&hellip;</span>
+      </div>
+      <button id="clean-btn" class="btn btn-primary" disabled>Copy cleaned URL</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <footer class="footer">
+      <button id="options-btn" class="btn btn-secondary">Settings</button>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

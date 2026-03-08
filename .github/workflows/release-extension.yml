@@ -1,0 +1,33 @@
+name: Package & Release Extension
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Zip browser extension and attach to release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create extension zip
+        run: |
+          cd browser-extension
+          zip -r "../url-clipboard-language-cleaner-${{ github.event.release.tag_name }}.zip" \
+            . \
+            --exclude "tests/*" \
+            --exclude "*/__pycache__/*" \
+            --exclude "*/.*"
+
+      - name: Attach zip to release
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "url-clipboard-language-cleaner-${{ github.event.release.tag_name }}.zip" \
+            --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

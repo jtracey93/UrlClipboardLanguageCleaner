@@ -88,3 +88,78 @@ Sets the polling interval to 300ms instead of the default 500ms. This has no eff
 - **Windows (background)**: End the `powershell.exe` process from Task Manager
 - **macOS**: `launchctl unload ~/Library/LaunchAgents/com.user.UrlClipboardLanguageCleaner.plist`
 - **Linux**: `systemctl --user stop UrlClipboardLanguageCleaner`
+
+---
+
+## Browser Extension (Chrome & Edge)
+
+A Manifest V3 browser extension is also available in the [`browser-extension/`](./browser-extension/) directory. It brings the same URL locale-cleaning functionality to Microsoft Edge and Google Chrome.
+
+### Install from the store
+
+| Browser | Store link |
+|---|---|
+| **Google Chrome** | [Install from Chrome Web Store](#) *(link coming soon — will be updated after publication)* |
+| **Microsoft Edge** | [Install from Edge Add-ons](#) *(link coming soon — will be updated after publication)* |
+
+### Features
+
+- **Automatic copy interception** — locale segments are stripped as you copy URLs from any web page
+- **Easy on/off toggle** — enable or disable from the extension popup without fully disabling the extension
+- **Clipboard inspector** — the popup shows your current clipboard URL and its cleaned equivalent, with a one-click "Copy cleaned URL" button
+- **Configurable patterns** — edit the locale regex and excluded 2-letter codes in the Settings page (defaults mirror the PowerShell module exactly)
+- **Persistent settings** — all preferences sync across browser profiles via `chrome.storage.sync`
+
+### Installing the extension (unpacked / developer mode)
+
+Both Chrome and Edge support loading unpacked extensions directly from the folder:
+
+#### Google Chrome
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode** (top-right toggle)
+3. Click **Load unpacked**
+4. Select the `browser-extension/` folder from this repository
+
+#### Microsoft Edge
+
+1. Open `edge://extensions`
+2. Enable **Developer mode** (left sidebar)
+3. Click **Load unpacked**
+4. Select the `browser-extension/` folder from this repository
+
+### Publishing to stores
+
+To publish to the Chrome Web Store or Edge Add-ons store, zip the contents of the `browser-extension/` folder and follow the submission process for each store:
+
+- **Chrome Web Store**: [developer.chrome.com/docs/webstore/publish](https://developer.chrome.com/docs/webstore/publish)
+- **Microsoft Edge Add-ons**: [learn.microsoft.com/en-us/microsoft-edge/extensions/publish/publish-extension](https://learn.microsoft.com/en-us/microsoft-edge/extensions/publish/publish-extension)
+
+### Extension structure
+
+```
+browser-extension/
+├── manifest.json            # Manifest V3 — compatible with Chrome and Edge
+├── background/
+│   └── service-worker.js    # Sets defaults on install, keeps badge in sync
+├── content/
+│   └── content.js           # Intercepts copy events in web pages
+├── popup/
+│   ├── popup.html           # Extension popup UI
+│   ├── popup.js             # Popup logic (toggle, clipboard preview)
+│   └── popup.css
+├── options/
+│   ├── options.html         # Full settings page
+│   ├── options.js           # Validation and save logic
+│   └── options.css
+└── icons/
+    ├── icon16.png
+    ├── icon48.png
+    └── icon128.png
+```
+
+### How it works
+
+The content script intercepts the browser's native `copy` event (in the capture phase) before clipboard contents are written. If the copied text is a URL containing a locale segment, it calls `event.clipboardData.setData()` with the cleaned URL and prevents the default write — so the locale-free version lands on your clipboard seamlessly.
+
+The popup additionally reads the clipboard directly (using the `clipboardRead` permission) so you can see and copy a cleaned URL even when the copy originated from outside a web page (e.g. the address bar).

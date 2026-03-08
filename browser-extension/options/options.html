@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings – URL Clipboard Language Cleaner</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <img src="../icons/icon48.png" alt="" class="logo" width="40" height="40" />
+      <div>
+        <h1 class="title">URL Clipboard Language Cleaner</h1>
+        <p class="subtitle">Settings</p>
+      </div>
+    </header>
+
+    <main>
+      <!-- Enable / Disable -->
+      <section class="section">
+        <h2 class="section-title">General</h2>
+        <div class="field toggle-field">
+          <div class="field-info">
+            <label class="field-label" for="enabled-toggle">Enable extension</label>
+            <p class="field-description">
+              When enabled, language/locale segments are automatically removed from URLs
+              as you copy them.
+            </p>
+          </div>
+          <label class="switch" aria-label="Toggle extension on or off">
+            <input type="checkbox" id="enabled-toggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Locale pattern -->
+      <section class="section">
+        <h2 class="section-title">Locale pattern</h2>
+        <div class="field">
+          <label class="field-label" for="locale-pattern">Regular expression</label>
+          <p class="field-description">
+            The regex used to detect locale/language path segments. Applied case-insensitively.
+            Must match the leading <code>/</code> of the segment and use a lookahead for the
+            trailing <code>/</code>.<br />
+            <strong>Default:</strong> <code>/[a-z]{2}(?:-[a-z]{2,4})?(?=/)</code>
+          </p>
+          <input
+            type="text"
+            id="locale-pattern"
+            class="text-input"
+            placeholder="/[a-z]{2}(?:-[a-z]{2,4})?(?=/)"
+            spellcheck="false"
+          />
+          <p id="pattern-error" class="error-msg" hidden></p>
+        </div>
+      </section>
+
+      <!-- Excluded codes -->
+      <section class="section">
+        <h2 class="section-title">Excluded codes</h2>
+        <div class="field">
+          <label class="field-label" for="excluded-codes">
+            Bare 2-letter codes to ignore
+          </label>
+          <p class="field-description">
+            Two-letter path segments listed here will <strong>not</strong> be removed because
+            they are common English words that may appear legitimately in URLs
+            (e.g. <code>/us/</code>, <code>/in/</code>, <code>/at/</code>).
+            Note: codes with a region subtag (e.g. <code>/no-nb/</code>) are always removed
+            regardless of this list. Enter one code per line, lowercase.
+          </p>
+          <textarea
+            id="excluded-codes"
+            class="text-input"
+            rows="8"
+            placeholder="to&#10;do&#10;go&#10;…"
+            spellcheck="false"
+          ></textarea>
+          <p id="codes-error" class="error-msg" hidden></p>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="reset-btn" class="btn btn-secondary">Restore defaults</button>
+        <button id="save-btn" class="btn btn-primary">Save settings</button>
+      </div>
+
+      <p id="save-status" class="save-status" aria-live="polite"></p>
+    </main>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
