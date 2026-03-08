@@ -81,6 +81,90 @@ function removeUrlLocale(text) {
 }
 
 /**
+ * Display a brief in-page toast when a URL locale is removed.
+ * Uses a closed shadow DOM for complete style isolation from the host page.
+ * @param {string} cleanedUrl
+ */
+function showToast(cleanedUrl) {
+  // Maximum z-index (2^31 − 1) ensures the toast sits above all page content
+  const MAX_Z_INDEX = 2147483647;
+  // Truncation constants: keep the displayed URL readable at a glance
+  const MAX_DISPLAY_LENGTH = 55;
+  const TRUNCATE_LENGTH = 52;
+
+  const TOAST_ID = '__urlcleaner-toast-host__';
+  const existing = document.getElementById(TOAST_ID);
+  if (existing) existing.remove();
+
+  const host = document.createElement('div');
+  host.id = TOAST_ID;
+  Object.assign(host.style, {
+    position: 'fixed',
+    bottom: '20px',
+    right: '20px',
+    zIndex: String(MAX_Z_INDEX),
+    pointerEvents: 'none'
+  });
+
+  const shadow = host.attachShadow({ mode: 'closed' });
+  const displayUrl =
+    cleanedUrl.length > MAX_DISPLAY_LENGTH
+      ? cleanedUrl.slice(0, TRUNCATE_LENGTH) + '\u2026'
+      : cleanedUrl;
+  const safeUrl = displayUrl
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const titleAttr = cleanedUrl.replace(/"/g, '&quot;');
+
+  shadow.innerHTML = `
+    <style>
+      .toast {
+        background: #0f4c81;
+        color: #fff;
+        border-radius: 10px;
+        padding: 10px 14px 10px 12px;
+        font: 500 13px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        max-width: 320px;
+        box-shadow: 0 6px 24px rgba(0,0,0,.28);
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        animation: uc-in .2s cubic-bezier(.2,.8,.4,1), uc-out .3s ease 2.7s forwards;
+      }
+      .icon {
+        width: 22px; height: 22px;
+        background: rgba(255,255,255,.18);
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 12px; flex-shrink: 0; margin-top: 1px;
+      }
+      .body { min-width: 0; }
+      .title {
+        font-size: 11px; font-weight: 700; letter-spacing: .06em;
+        text-transform: uppercase; opacity: .75; margin-bottom: 3px;
+      }
+      .url {
+        font: 12px/1.35 'Cascadia Code', Consolas, 'Courier New', monospace;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        max-width: 268px; opacity: .95;
+      }
+      @keyframes uc-in  { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+      @keyframes uc-out { to   { opacity: 0; transform: translateY(4px); } }
+    </style>
+    <div class="toast">
+      <div class="icon">&#10003;</div>
+      <div class="body">
+        <div class="title">Locale removed</div>
+        <div class="url" title="${titleAttr}">${safeUrl}</div>
+      </div>
+    </div>`;
+
+  document.documentElement.appendChild(host);
+  setTimeout(() => host.remove(), 3000);
+}
+
+/**
  * Copy-event handler – rewrites the clipboard text if a locale is detected.
  * @param {ClipboardEvent} event
  */
@@ -95,6 +179,7 @@ function onCopy(event) {
 
   event.clipboardData.setData('text/plain', cleaned);
   event.preventDefault();
+  showToast(cleaned);
 }
 
 // Listen at the capture phase so we run before any page handlers
