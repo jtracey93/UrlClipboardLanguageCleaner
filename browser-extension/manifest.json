@@ -1,8 +1,10 @@
 {
   "manifest_version": 3,
   "name": "URL Clipboard Language Cleaner",
+  "short_name": "URL Cleaner",
   "version": "1.0.0",
   "description": "Automatically removes language/locale segments (e.g. /en-gb/, /fr-fr/) from URLs when you copy them.",
+  "homepage_url": "https://github.com/jtracey93/UrlClipboardLanguageCleaner",
   "permissions": [
     "storage",
     "clipboardRead",
