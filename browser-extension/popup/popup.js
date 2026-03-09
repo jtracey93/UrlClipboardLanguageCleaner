@@ -107,7 +107,7 @@ function escapeHtml(str) {
  * Wait until the document has focus (required for navigator.clipboard access).
  * Resolves immediately if the document already has focus, otherwise listens
  * for a 'focus' event with a timeout.
- * @param {number} timeoutMs – maximum time to wait for focus (default 2 000 ms)
+ * @param {number} timeoutMs – maximum time to wait for focus (default 2000 ms)
  * @returns {Promise<boolean>} true if focused, false on timeout
  */
 function waitForFocus(timeoutMs = 2000) {
@@ -149,28 +149,36 @@ async function readClipboardWithRetry(maxAttempts = 3) {
     const text = await tryReadClipboard();
     if (text !== null) return { text, ok: true };
     // Wait a short, increasing delay before retrying (100 ms, 200 ms, …)
-    await new Promise((r) => setTimeout(r, (attempt + 1) * 100));
+    await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 100));
   }
   return { text: null, ok: false };
 }
 
-async function checkClipboard(excludedCodes, localePattern) {
-  // Ensure the popup has focus before attempting clipboard access
-  await waitForFocus();
+let checkInProgress = false;
 
-  const { text, ok } = await readClipboardWithRetry();
-  if (!ok) {
-    previewEl.innerHTML =
-      '<span class="placeholder">Clipboard access unavailable. Click here to retry.</span>';
-    cleanBtn.disabled = true;
-    return;
+async function checkClipboard(excludedCodes, localePattern) {
+  if (checkInProgress) return;
+  checkInProgress = true;
+  try {
+    // Ensure the popup has focus before attempting clipboard access
+    await waitForFocus();
+
+    const { text, ok } = await readClipboardWithRetry();
+    if (!ok) {
+      previewEl.innerHTML =
+        '<span class="placeholder">Clipboard access unavailable. Click here to retry.</span>';
+      cleanBtn.disabled = true;
+      return;
+    }
+    if (!text) {
+      showPreview(null, null);
+      return;
+    }
+    const cleaned = removeUrlLocale(text, excludedCodes, localePattern);
+    showPreview(text, cleaned);
+  } finally {
+    checkInProgress = false;
   }
-  if (!text) {
-    showPreview(null, null);
-    return;
-  }
-  const cleaned = removeUrlLocale(text, excludedCodes, localePattern);
-  showPreview(text, cleaned);
 }
 
 // ─── Initialise ──────────────────────────────────────────────────────────────
