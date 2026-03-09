@@ -103,34 +103,96 @@ function escapeHtml(str) {
 
 // ─── Clipboard check ─────────────────────────────────────────────────────────
 
-async function checkClipboard(excludedCodes, localePattern) {
+/**
+ * Wait until the document has focus (required for navigator.clipboard access).
+ * Resolves immediately if the document already has focus, otherwise listens
+ * for a 'focus' event with a timeout.
+ * @param {number} timeoutMs – maximum time to wait for focus (default 2 000 ms)
+ * @returns {Promise<boolean>} true if focused, false on timeout
+ */
+function waitForFocus(timeoutMs = 2000) {
+  if (document.hasFocus()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const onFocus = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      window.removeEventListener('focus', onFocus);
+      resolve(document.hasFocus());
+    }, timeoutMs);
+    window.addEventListener('focus', onFocus, { once: true });
+  });
+}
+
+/**
+ * Attempt a single clipboard read.
+ * @returns {Promise<string|null>} clipboard text, or null on failure
+ */
+async function tryReadClipboard() {
   try {
-    const text = await navigator.clipboard.readText();
-    if (!text) {
-      showPreview(null, null);
-      return;
-    }
-    const cleaned = removeUrlLocale(text, excludedCodes, localePattern);
-    showPreview(text, cleaned);
+    return await navigator.clipboard.readText();
   } catch (_) {
-    // Clipboard access denied or unavailable
-    previewEl.innerHTML =
-      '<span class="placeholder">Clipboard access unavailable.</span>';
-    cleanBtn.disabled = true;
+    return null;
   }
+}
+
+/**
+ * Read the clipboard with retries.
+ * navigator.clipboard.readText() can fail transiently when the popup is still
+ * gaining focus. This helper retries a few times with increasing delays.
+ * @param {number} maxAttempts
+ * @returns {Promise<{text: string|null, ok: boolean}>}
+ */
+async function readClipboardWithRetry(maxAttempts = 3) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const text = await tryReadClipboard();
+    if (text !== null) return { text, ok: true };
+    // Wait a short, increasing delay before retrying (100 ms, 200 ms, …)
+    await new Promise((r) => setTimeout(r, (attempt + 1) * 100));
+  }
+  return { text: null, ok: false };
+}
+
+async function checkClipboard(excludedCodes, localePattern) {
+  // Ensure the popup has focus before attempting clipboard access
+  await waitForFocus();
+
+  const { text, ok } = await readClipboardWithRetry();
+  if (!ok) {
+    previewEl.innerHTML =
+      '<span class="placeholder">Clipboard access unavailable. Click here to retry.</span>';
+    cleanBtn.disabled = true;
+    return;
+  }
+  if (!text) {
+    showPreview(null, null);
+    return;
+  }
+  const cleaned = removeUrlLocale(text, excludedCodes, localePattern);
+  showPreview(text, cleaned);
 }
 
 // ─── Initialise ──────────────────────────────────────────────────────────────
 
+// Store settings at module scope so click-to-retry can use them
+let activeExcludedCodes = DEFAULT_EXCLUDED_CODES;
+let activeLocalePattern = '/[a-z]{2}(?:-[a-z]{2,4})?(?=/)';
+
 chrome.storage.sync.get(['enabled', 'excludedCodes', 'localePattern'], async (result) => {
   const enabled = result.enabled !== undefined ? result.enabled : true;
-  const excludedCodes = result.excludedCodes || DEFAULT_EXCLUDED_CODES;
-  const localePattern = result.localePattern || '/[a-z]{2}(?:-[a-z]{2,4})?(?=/)';
+  activeExcludedCodes = result.excludedCodes || DEFAULT_EXCLUDED_CODES;
+  activeLocalePattern = result.localePattern || '/[a-z]{2}(?:-[a-z]{2,4})?(?=/)';
 
   toggle.checked = enabled;
   setStatusLabel(enabled);
 
-  await checkClipboard(excludedCodes, localePattern);
+  await checkClipboard(activeExcludedCodes, activeLocalePattern);
+});
+
+// Allow clicking the preview area to re-check the clipboard
+previewEl.addEventListener('click', () => {
+  checkClipboard(activeExcludedCodes, activeLocalePattern);
 });
 
 // ─── Toggle handler ──────────────────────────────────────────────────────────
