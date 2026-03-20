@@ -13,8 +13,8 @@ A Manifest V3 browser extension is also available in the [`browser-extension/`](
 
 | Browser | Store link |
 |---|---|
-| **Google Chrome** | [Install from Chrome Web Store](#) *(link coming soon — will be updated after publication)* |
-| **Microsoft Edge** | [Install from Edge Add-ons](#) *(link coming soon — will be updated after publication)* |
+| **Google Chrome** | [Install from Chrome Web Store](https://chromewebstore.google.com/detail/url-clipboard-language-cl/lelbdplafgjmiccacifgpflfccnmchfj)  |
+| **Microsoft Edge** | [Install from Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/url-clipboard-language-cl/eeahoklgnhdkbmidbhbgehkiedacmnec)  |
 
 ### Features
 
